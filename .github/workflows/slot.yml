@@ -1,0 +1,75 @@
+name: eloquiz-slot
+# One @eloquiz reel per run. Times are UTC = Tashkent - 5 h: 09:30, 12:30, 15:30, 18:30, 21:00, 23:30 Tashkent.
+on:
+  schedule:
+    - cron: "30 4 * * *"
+    - cron: "30 7 * * *"
+    - cron: "30 10 * * *"
+    - cron: "30 13 * * *"
+    - cron: "0 16 * * *"
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Slot 1-6 (empty = by current time)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Render + Telegram only, do not post to Instagram"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: eloquiz-slot
+  cancel-in-progress: false
+jobs:
+  slot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Tools (ffmpeg, fonts)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-liberation
+      - run: pip install -q -r requirements.txt
+      - name: Pick clip (Claude) + render reel
+        id: build
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLOT: ${{ inputs.slot }}
+        run: python cloud/run_slot.py build ${SLOT:+--slot "$SLOT"}
+      - if: steps.build.outputs.go == 'true'
+        uses: actions/configure-pages@v5
+      - if: steps.build.outputs.go == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - if: steps.build.outputs.go == 'true'
+        id: deploy
+        uses: actions/deploy-pages@v4
+      - name: Post to Instagram + Telegram
+        if: steps.build.outputs.go == 'true'
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          DRY: ${{ inputs.dry_run && '--dry' || '' }}
+        run: python cloud/run_slot.py publish $DRY
+      - name: Save state
+        if: always()
+        run: |
+          git config user.name "eloquiz-bot"
+          git config user.email "eloquiz-bot@users.noreply.github.com"
+          git add state
+          git diff --cached --quiet || git commit -qm "state: $(date -u +%F-%H%M)"
+          git pull -q --rebase && git push -q

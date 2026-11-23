@@ -1,0 +1,6 @@
+site/
+work/
+reels/queue/
+__pycache__/
+*.pyc
+.DS_Store
