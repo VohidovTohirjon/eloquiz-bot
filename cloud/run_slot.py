@@ -206,6 +206,8 @@ def build(args):
     now = dt.datetime.now(TZ)
     gh_output(go="false")
     forced = int(args[args.index("--slot") + 1]) if "--slot" in args else None
+    if os.environ.get("CONFIGURED") == "false" and forced is None:
+        log("no Telegram/Instagram secrets yet: scheduled run skipped (nothing would be delivered)"); return
     slot = current_slot(now, forced)
     key = f"{now.date()}:{slot}"
     done = load("slots.json", {})
@@ -272,6 +274,23 @@ def wait_public(url, tries=30):
     return False
 
 
+def refresh_token(tok: str):
+    """Instagram long-lived tokens last 60 days; refreshing weekly keeps them alive. Returns a warning or None."""
+    meta = load("token.json", {})
+    last = meta.get("refreshed", "2000-01-01")
+    if (dt.date.today() - dt.date.fromisoformat(last)).days < 7:
+        return None
+    r = http("GET", "https://graph.instagram.com/refresh_access_token?" +
+             urllib.parse.urlencode({"grant_type": "ig_refresh_token", "access_token": tok}))
+    if "access_token" not in r:
+        return f"⚠️ Instagram token refresh failed: {r.get('error', {}).get('message', r)}"[:200]
+    meta = {"refreshed": str(dt.date.today()), "expires_in_days": int(r.get("expires_in", 0)) // 86400}
+    save("token.json", meta)
+    if r["access_token"] != tok:
+        return "⚠️ Meta issued a new Instagram token: update the IG_ACCESS_TOKEN secret within 60 days"
+    return None
+
+
 def instagram(plan) -> tuple[str | None, str]:
     uid, tok = os.environ.get("IG_USER_ID"), os.environ.get("IG_ACCESS_TOKEN")
     if not (uid and tok):
@@ -280,6 +299,9 @@ def instagram(plan) -> tuple[str | None, str]:
     if not wait_public(video):
         return None, "video link not public in time: post it from your phone"
     auth = {"Authorization": f"Bearer {tok}"}
+    warn = refresh_token(tok)
+    if warn:
+        plan["warn"] = warn
     form = {"media_type": "REELS", "video_url": video, "caption": plan["caption"], "share_to_feed": "true"}
     if (SITE / "r" / f"{plan['rid']}.jpg").exists():
         form["cover_url"] = f"{PAGES}/r/{plan['rid']}.jpg"
@@ -336,7 +358,9 @@ def publish(args):
         link, status = None, "dry run: not posted"
     else:
         link, status = instagram(plan)
-    line = f"✅ Posted: <a href=\"{html.escape(link)}\">open on Instagram</a>" if status == "posted" else f"📲 {html.escape(status)}"
+    line = f"✅ Posted: <a href=\"{html.escape(link or '')}\">open on Instagram</a>" if status == "posted" else f"📲 {html.escape(status)}"
+    if plan.get("warn"):
+        line += "\n" + html.escape(plan["warn"])
     telegram(plan, line)
     done = load("slots.json", {})
     done[plan["key"]] = {"status": "published" if status == "posted" else "delivered", "rid": plan["rid"], "note": status}

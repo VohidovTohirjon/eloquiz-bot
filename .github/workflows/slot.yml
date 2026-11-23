@@ -46,6 +46,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SLOT: ${{ inputs.slot }}
+          CONFIGURED: ${{ secrets.TELEGRAM_BOT_TOKEN != '' || secrets.IG_ACCESS_TOKEN != '' }}
         run: python cloud/run_slot.py build ${SLOT:+--slot "$SLOT"}
       - if: steps.build.outputs.go == 'true'
         uses: actions/configure-pages@v5
