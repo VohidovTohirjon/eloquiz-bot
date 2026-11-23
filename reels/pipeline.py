@@ -137,7 +137,7 @@ def quiz_spec(nick, elo, level, country, rank_pos, region, clip, p, permitted) -
                        "credit": (f"Clip: {nick} on FACEIT  ·  captured by Allstar" if permitted else f"PREVIEW: ask {nick} before posting")}}
 
 
-RUBRICS = ["elo", "clutch", "legit", "pure"]
+RUBRICS = ["elo", "clutch", "pure"]          # legit-or-cheating dropped 2026-11-23: the answer was always LEGIT
 SAFE_MP4 = re.compile(r"https://media2\.allstar\.gg/[0-9a-f]{12,40}/clips/[0-9a-f]{12,40}\.mp4")
 SAFE_UID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 QUEUE = HERE / "queue"
@@ -182,9 +182,6 @@ def eligible(info: dict, p: dict, clip: dict) -> list[str]:
         or int(clip.get("views") or 0) >= 1000 else []
     if p["clutch_vs"]:
         out.append("clutch")
-    top = info["pro"] or (info["level"] == 10 and info["rank_pos"] and info["rank_pos"] <= 30000)
-    if top and ((p["kills"] or 0) >= 4 or p["wallbang"] or p["quickscope"]):
-        out.append("legit")          # playbook rule: legit-or-cheating only for verified/top players, answer is always LEGIT
     if not info["pro"]:
         out.append("elo")            # pro rule: famous pros never go into Guess the Elo
     return out
@@ -305,7 +302,7 @@ def recent_nicks(days: int = 7) -> set[str]:
 
 
 def pick_rubric(options: list[str]):
-    order = {r: i for i, r in enumerate(["legit", "clutch", "pure", "elo"])}  # scarcer rubrics win ties
+    order = {r: i for i, r in enumerate(["clutch", "pure", "elo"])}  # scarcer rubrics win ties
     return min(options, key=lambda r: (queued(r), order[r])) if options else None
 
 
