@@ -72,12 +72,19 @@ def main():
     # ---- gameplay plan
     first = kills[0] if kills else max(lo, hi - 10)
     start = max(lo, first - 3 * p, hi - 18)
+    pay_U = []                                                   # payoff kill times (relative to the payoff start)
     if rub == "clutch":
         last = kills[-1] if kills else hi - 1.0
-        pause = max(start + 2 * p, last - 0.9)
-        start = max(lo, min(first - 3 * p, pause - 9.0))     # every kill of the clutch + its setup                       # enough of the setup to feel the clutch
+        if spec.get("mode") == "killcount" and len(kills) >= 2:
+            pause = kills[0] + 0.45                              # viewers saw 1 kill: how many will he end with?
+        else:
+            pause = max(start + 2 * p, last - 0.9)
+        lead = 3.5 if spec.get("mode") == "killcount" else 3 * p     # kill-count: enough action before kill 1 to hook
+        start = max(lo, min(first - lead, pause - 9.0))          # the setup + every kill before the pause
         segs, U, play_len = plan_segments(kills, p, start, pause)
-        pay_segs = [(pause, last, 1.0), (last, min(hi, last + 0.5), 0.5)]
+        mid = [k for k in kills if pause < k < last]
+        pay_segs, pay_U, _ = plan_segments(mid + [last], p, pause, last) if last > pause + 0.05 else ([], [], 0)
+        pay_segs = pay_segs + [(last, min(hi, last + 0.5), 0.5)]
         if hi - (last + 0.5) > 0.1: pay_segs.append((last + 0.5, min(hi, last + 0.9), 1.0))
     else:
         stop = min(hi, (kills[-1] + 0.6) if kills else hi)
@@ -101,7 +108,9 @@ def main():
     total = R0 + hold
     drop = next((d for d in drops if d >= land), drops[-1])
     M = max(0.0, drop - land)
-    pay_kill_u = P0 + (pay_segs[0][1] - pay_segs[0][0]) if pay_segs else None
+    pay_hits = [P0 + u for u in pay_U]
+    if spec.get("kills_total"):
+        show_counter = show_counter and len(kills) == spec["kills_total"]
 
     # ---- sprites
     hook = shadowed(spec.get("hook") or QUESTION[rub], BLACK, 110, WHITE)
@@ -209,11 +218,13 @@ def main():
             return bg
         if t < R0:                                               # PAYOFF (clutch)
             j = min(len(pay) - 1, int((t - P0) * FPS))
-            img = punch(Image.frombuffer("RGB", (W, H), pay[j]).convert("RGBA"), t, [pay_kill_u]).copy()
+            img = punch(Image.frombuffer("RGB", (W, H), pay[j]).convert("RGBA"), t, pay_hits).copy()
             put(img, hook_chip, 340)
-            if show_counter and t >= pay_kill_u:
-                put(img, counters[len(kills)], 575, 1, pop(t, pay_kill_u, 0.18, 0.4), cx=150)
-                put(img, klabel[2 if len(kills) > 1 else 1], 690, cx=150)
+            kc = len(U) + sum(1 for u in pay_hits if t >= u)
+            if show_counter and kc:
+                last_hit = max([u for u in U + pay_hits if u <= t] or [0])
+                put(img, counters[min(kc, max(counters))], 575, 1, pop(t, last_hit, 0.18, 0.4), cx=150)
+                put(img, klabel[1 if kc == 1 else 2], 690, cx=150)
             put(img, WM, 1450)
             return img
         tr_ = t - R0                                             # REVEAL

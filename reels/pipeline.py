@@ -237,23 +237,25 @@ def build(rubric: str, info: dict, c: dict, mp4: str) -> Path:
                 spec = quiz_spec(nick, info["elo"], info["level"], info["country"], info["rank_pos"], info["region"], c, p, True)
                 spec["start"] = round(max(0.0, end - 18), 2)
                 cap = caption(nick, c, p, spec)
-            elif rubric == "clutch":
-                pause = round(end - 3.2, 2)                       # stop just before the last kill, play it as the payoff
-                spec = {"rubric": "clutch", "start": round(max(0.0, pause - 15), 2), "hook": "CLUTCH OR CHOKE?",
-                        "hook_sub": f"last alive vs {p['clutch_vs']} on {p['map'] or 'FACEIT'} · we pause before the end",
-                        "options": ["CLUTCH", "CHOKE"], "answer_index": 0,
-                        "payoff": {"start": pause, "end": end, "title": "LET'S SEE...", "label": "LET'S SEE...",
-                                   "sub": f"1v{p['clutch_vs']} · {p['map']}".strip(" ·")},
-                        "reveal": {"answer_line": "ANSWER: A) CLUTCH", "big": "CLUTCHED",
+            elif rubric == "clutch":   # kill-count quiz: Allstar only clips WON clutches, so we ask how many kills he ends with
+                K = p["kills"] or 1
+                vals = killcount_options(K, c["id"])
+                labels = [kill_label(v) for v in vals]
+                ai = vals.index(K)
+                vs = p["clutch_vs"]
+                spec = {"rubric": "clutch", "mode": "killcount", "kills_total": K, "hook": "HOW MANY KILLS?",
+                        "hook_sub": f"1v{vs} on {p['map'] or 'FACEIT'} · watch closely",
+                        "question": "HOW MANY KILLS IN THIS ROUND?", "options": labels, "answer_index": ai,
+                        "reveal": {"answer_line": f"ANSWER: {'ABC'[ai]}) {labels[ai]}", "big": kill_label(K, big=True),
                                    "rank": f"#{info['rank_pos']:,} ON FACEIT" if info["rank_pos"] else f"FACEIT LEVEL {info['level']}",
                                    "who": "  ·  ".join(x for x in [nick, lvl, elo_s] if x),
-                                   "round": [f"1v{p['clutch_vs']} clutch" + (f"  ·  {p['kills']} kills" if p["kills"] else ""),
+                                   "round": [f"1v{vs} clutch won  ·  {K} kill{'s' if K > 1 else ''}",
                                              "  ·  ".join(x for x in [p["weapon"] or "", f"{p['map']} round {c.get('round', '?')}"] if x)],
                                    "match": f"{int(c.get('views') or 0):,} views on FACEIT", "credit": credit}}
-                cap = (f"Clutch or choke? 😬 Last one alive against {p['clutch_vs']} on {p['map'] or 'FACEIT'}. We pause right before the end.\n\n"
-                       f"🗳 A) CLUTCH   B) CHOKE\nComment A or B, then watch what happens 👇\n\n" + FOOT.format(nick=nick)
-                       + "\n\n" + tags(p, "#cs2clips"))
-                end = pause
+                opts = "   ".join(f"{'ABC'[i]}) {l}" for i, l in enumerate(labels))
+                cap = (f"1v{vs} on {p['map'] or 'FACEIT'}{' with the ' + p['weapon'] if p['weapon'] else ''}. "
+                       f"How many kills does he finish the round with? 🤔\n\n🗳 {opts}\n"
+                       f"Comment A, B or C, then watch the rest 👇\n\n" + FOOT.format(nick=nick) + "\n\n" + tags(p, "#cs2clips"))
             else:  # legit
                 spec = {"rubric": "legit", "start": round(max(0.0, end - 18), 2), "hook": "LEGIT OR CHEATING?",
                         "hook_sub": f"{what_of(p)} on {p['map'] or 'FACEIT'} · decide before the end",
@@ -299,6 +301,23 @@ def recent_nicks(days: int = 7) -> set[str]:
         if src.parent.parent.name >= cutoff:
             out.add(json.loads(src.read_text()).get("nick", "").lower())
     return out - {""}
+
+
+def kill_label(v: int, big: bool = False) -> str:
+    return "ACE" if v >= 5 else (f"{v} KILL" if v == 1 else f"{v} KILLS")
+
+
+def killcount_options(k: int, seed: str) -> list[int]:
+    """3 kill counts (1-5) that include the real one; where it sits (A/B/C) varies with the clip."""
+    import random
+    rnd = random.Random(seed)
+    for _ in range(50):
+        layout = rnd.choice(["low", "mid", "high"])
+        vals = {"low": [k, k + 1, k + rnd.choice([2, 3])], "mid": [k - 1, k, k + 1],
+                "high": [k - rnd.choice([2, 3]), k - 1, k]}[layout]
+        if all(1 <= v <= 5 for v in vals):
+            return sorted(set(vals))
+    return sorted({1, 2, 3, 4, 5} - {v for v in (1, 5) if v != k})[:3] if k in (2, 3, 4) else ([1, 2, 3] if k == 1 else [3, 4, 5])
 
 
 def pick_rubric(options: list[str]):
